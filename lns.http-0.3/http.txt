@@ -1,0 +1,123 @@
+notes for the LNS/HTTP web server
+=================================
+
+
+ example on how to set up and start your own server instance
+ -----------------------------------------------------------
+
+(defun start-test-setup ()
+  "Start a minimal test setup"
+
+  (register-server (create-server :name "test"
+                                  :ip "0.0.0.0"
+                                  :port 8080))
+  (register-server-host-name "test" "localhost")
+
+  (register-url-handler "test"
+                        "localhost"
+                        "/hello"
+                        #'(lambda (request)
+                            (url-handler-hello request)))
+  (register-url-handler "test"
+                        "localhost"
+                        "/server-info"
+                        #'(lambda (request)
+                            (lns.http:url-handler-server-info request)))
+
+  (start-server "test"))
+
+
+
+detailed description of the above:
+ - (create-server ...) creates a server instance structure, populates
+   it with the supplied values and returns it, will return nil not all
+   required values are supplied.
+ - (register-server ...) registers the supplied server structure in
+   the global server directory, will refuse to do so if the server
+   structure contains invalid values or is already registered
+ - (register-server-host-name ...) adds the specified hostname to the
+   list of hostnames this server will listen to.
+ - (register-url-handler ...) registers a handler functions
+   responsible for handling incoming requests that are uniquely
+   identified by the server instance, server hostname and the request
+   URI path
+ - (start-server ...) will start a registered server instance by
+   registering a closure calling the (LNS/HTTP internal) acceptor
+   function with LNS, your server instance is now listening on the
+   network and ready to serve requests
+ - Why register a closure that basically just wraps around the
+   function and not simply the funcion itself? Because that way,
+   reloading the definition of the functions takes effect immediately
+   instead of after re-registering the handler.
+
+
+what happens when a request comes in?
+-------------------------------------
+
+ - the closure calls the acceptor function
+ - the acceptor function calls the analyze-request and process-uri
+   functions to populate the request structure
+ - analyze-request parses the request line and reads any headers sent
+   by the client, but does not touch the request body
+ - process-uri further analyzes the URI provided in the request line
+   and breaks it down into the path and the query, with the query
+   being broken down further into the query arguments (key-value
+   pairs)
+ - this information is the stored in the request structure
+ - the request gets logged (may need to be moved to a later
+   part of the process)
+ - the request is the handed over to handle-request
+ - handle-request uses the predicate is-valid-http-requestp to check
+   if the request is valid, if it is not, then the default error
+   handler is invoked, otherwise handle-request tries to find a
+   matching URL handler and if successfull, invokes it, otherwise
+   the default handler is invoked
+ - the invoked handler does something with the request and terminates
+ - the cleanup code closes the socket and finally terminates the
+   thread
+ - there is _also_ a connection timeout, if the connection is still 
+   active when the timeout hits, the connection will be forcibly
+   closed and the thread terminated
+
+
+
+Overview
+--------
+
+ - server-instances
+   - have a unique name
+   - are incorporated as listener processes listening on a socket
+   - have none, one or more server-names (like www.example.com)
+     assigned to them, the default server-name is NIL
+   - for each server-name, a list of URL-handlers exist
+     when registering a URL handler, you have to provide:
+     - the server-instance name
+     - the server-name (NIL allowed == default name)
+     - the URI path to handle (NIL allowed == default handler)
+     - the function handling the request
+
+
+data tree
+
+*servers*
+   |
+   +---server-instance foobar
+   |                      |
+   |                      +-- host-name www.foobar.com
+   |                      |                  |
+   |                      |                  +-- url-handler /products
+   |                      |                  +-- url-handler /about
+   |                      |
+   |                      +-- host-name www.quux.org
+   |                                         |
+   |                                         +-- url-handler /info
+   |                                         +-- url-handler /manual
+   |
+   +--- server-instance testbench
+                          |
+                          +-- host-name www-test.foobar.com
+                                             |
+                                             +-- url-handler /products
+                                             +-- url-handler /about
+                                             
+ 
